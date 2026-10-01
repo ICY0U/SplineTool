@@ -68,7 +68,7 @@ public:
 	UPROPERTY(EditAnywhere, config, Category = "Ledges", meta = (ClampMin = "0", Units = "Centimeters"))
 	double MinDrop = 25;
 
-	/** Edges that fall less than Min Drop onto a wide, level landing: curbs, manual pads and low steps. Stairs are never lined. */
+	/** Edges that fall less than Min Drop onto a wide, level landing: curbs, manual pads and low steps. Stair nosings are left out (Reject Stairs). */
 	UPROPERTY(EditAnywhere, config, Category = "Ledges")
 	EAutoGrindLowLedges LowLedges = EAutoGrindLowLedges::Suggest;
 
@@ -91,6 +91,10 @@ public:
 	/** Test the space over and beside each edge against the meshes around it, so an edge buried in a wall or pressed against one is not a line. Slower on big scans. */
 	UPROPERTY(EditAnywhere, config, Category = "Ledges")
 	bool bCheckWalls = true;
+
+	/** Leave out stair nosings: an edge with another step lying just past it or rising just behind it. */
+	UPROPERTY(EditAnywhere, config, Category = "Ledges", AdvancedDisplay)
+	bool bRejectStairs = true;
 
 	// ----- Rails -----
 

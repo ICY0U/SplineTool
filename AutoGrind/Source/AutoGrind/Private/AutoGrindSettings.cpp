@@ -54,6 +54,7 @@ void UAutoGrindSettings::ApplyPreset(EAutoGrindPreset Preset)
 	MinEdgeAngle = 30;
 	GapBridge = 6;
 	bCheckWalls = true;
+	bRejectStairs = true;
 	RailMaxWidth = 15;
 	RailMaxThickness = 20;
 	RailMinDrop = 10;
@@ -120,6 +121,7 @@ AutoGrindCore::Settings UAutoGrindSettings::ToCore() const
 	Out.SteepLipDegrees = SteepLip;
 	Out.MinEdgeAngleDegrees = MinEdgeAngle;
 	Out.GapBridge = GapBridge;
+	Out.bRejectStairs = bRejectStairs;
 	Out.RailMaxWidth = RailMaxWidth;
 	Out.RailMaxThickness = RailMaxThickness;
 	Out.RailMinDrop = RailMinDrop;
