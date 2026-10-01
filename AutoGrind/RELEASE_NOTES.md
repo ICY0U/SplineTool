@@ -1,3 +1,86 @@
+# AutoGrind 1.0.0
+
+A rework of detection, the panel and placing, and a new way to place lines: click points in the viewport.
+
+## Detection
+
+- **Modular pieces are one line.** Ledge, curb and rail modules placed next to each other, with gaps,
+  overlaps or slight misalignment, now give one line across all of them, so one grind actor runs the
+  whole length instead of one per piece (Join Across Meshes). Lines still stop at real corners, and two
+  copies of the same mesh in one place give one set of lines.
+- **Rail or stone.** A narrow top is a rail when it is round or its body is thin, and stone when it sits on
+  a deep body: planter and concrete wall tops are stone (Rail Max Thickness). Square and flat bars, kinked
+  and sloped rails and rails on posts or above walls are rails; quarter-pipe and bowl coping is a rail; a
+  pipe too wide to be a rail gives one stone line along its crest (Round Top Max Width).
+- **Convexity.** The surface must turn down sharply over an edge (Min Edge Angle), so domes, mounds,
+  rounded shapes such as cars and the sloping sides of kickers and banks get no lines, while bevelled and
+  bullnosed ledges keep theirs.
+- **What not to line.** Stairs, ramp sides, roofs and high wall tops (Max Drop), seams and slat gaps,
+  edges against walls and covered tops are left out. Curbs and manual pads (Low Ledges), very high drops
+  such as the backs of decks (High Drop), rounded edges, partial rails, ridges (Detect Ridges) and short
+  lines are listed for review instead of being kept.
+- **Confidence.** Every line has a confidence and notes saying why; lines below Keep Confidence are listed
+  unticked.
+- **Messy geometry.** Triangles wound the wrong way are turned round and double-sided planes are read as
+  one surface (Repair Winding).
+- **Spline meshes** are scanned as they are bent; instanced meshes per instance.
+- **Faster.** In the stress test a 480,000-triangle mesh scans in about 2 seconds, and 200 modular pieces in a
+  hundredth of one.
+
+## Drawing lines by hand (new)
+
+- Switch on **Draw Lines** and click points in the viewport; Enter places a grind actor along them.
+- Clicks snap to scanned lines, then to the sharp convex edges of the mesh under the cursor and the
+  pieces around it, then to the surface. Shift+Click places a point without snapping.
+- Between two clicks the line follows the edge or scanned line round curves and corners and across
+  modular pieces. Ctrl+Click takes a whole edge run or scanned line at once.
+- T switches rail, stone or auto, F following edges, S snapping. Each drawn line is one undo step, goes in
+  its own outliner folder and is never replaced by Generate.
+
+## Panel
+
+- **Whole Level** scans, with filters for scenery names, collision, hidden actors and small props, and
+  `NoGrind` / `AutoGrindIgnore` tags.
+- **Presets**: Skatepark, Street, Strict and Loose.
+- A sortable, searchable list with Kept, Review, Rails and Stone filters, confidence and notes columns,
+  tooltips explaining each line, bulk actions, a context menu and keyboard shortcuts.
+- The selected lines are highlighted in the viewport with direction arrows; Show Directions draws arrows
+  on every line.
+- The summary explains near misses by reason and the setting that decides.
+- Remove scanned lines, drawn lines or both; Select Placed; an icon, a toolbar button and a help link.
+
+## Placing
+
+- New output settings: Grind Actor Class (and how it stores rail or stone), Output Folder, Label Prefix,
+  Height Offset and Point Type (Linear or Curve).
+- Placing still validates every new actor before replacing earlier output, and fails without changing
+  anything.
+
+## Measured
+
+On the benchmark of 40 skatepark scenes in `Tests/` (each also turned and moved off the origin: 200 runs):
+
+| | 0.11 | 1.0 |
+| --- | --- | --- |
+| Scenes passed | 17 of 40 | 40 of 40 (200 of 200) |
+| Joining scenes (modular pieces) | 1 of 12 | 12 of 12 |
+| Rail scenes | 7 of 12 | 12 of 12 |
+| Filtering scenes (what not to line) | 9 of 14 | 14 of 14 |
+| Messy geometry scenes | 0 of 2 | 2 of 2 |
+| Required length covered by lines of the right kind | 78.3% of 203 m | 100% |
+| Required lines missing | 14 | 0 |
+| Lines split into extra pieces | 33 | 0 |
+| Lines of the wrong kind | 6 | 0 |
+| Line length where no line belongs | 25.4 m | 0 |
+| Lines on stairs, slopes and other forbidden places | 10 | 0 |
+
+0.11 had no review list, so every line it found counts as kept.
+
+## Upgrading
+
+Close the editor and replace `Plugins/AutoGrind`. Settings saved by 0.11 carry over; new settings start at
+their defaults. Lines placed by 0.11 carry the same tags and are replaced by Generate as before.
+
 # AutoGrind 0.11.0 preview
 
 Detection fixes found scanning a ripped city map (NYC Brooklyn: 161 meshes went from 1215 lines to 515).

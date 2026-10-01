@@ -1,33 +1,52 @@
 # AutoGrind tests
 
-## Standalone regressions
+Three kinds of check. Only the last needs Unreal; none needs the game.
 
-Run `run_regression.bat` on Windows with Visual Studio C++ Build Tools installed. This builds the
-actual detector with warnings as errors and tests long-edge obstruction splitting, straight-line
-simplification, stair/missing-ground rejection, rail pairing across interrupted sides, and closed
-curve/rail seam preservation. No game assets are needed.
+## The detector on its own
 
-0.11.0 adds scenes built from boxes and 12-sided tubes, scanned with the drop and wall tests over
-their own triangles: a slatted bench seat (only its outer edges), a ledge with a 45 degree chamfer
-(one line, at the chamfer's foot), a tube rail with a bracket at crest height (one rail across it),
-a ledge buried in a wall (no line inside), two wall blocks with a 1 cm seam (joined lines), a hoop of
-tube built from long facets (one closed rail) and a sloped handrail of 3 m facets (one rail). Each
-of these fails when the fix it covers is undone.
+`../Source/AutoGrind/Private/Core` is engine-free: the plugin compiles it, and so do these checks.
 
-The retail recall scores below are historical 0.9.0 results, not 0.10.0 measurements.
+    cmake -S AutoGrind/Tests -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build --config Release
+    ctest --test-dir build -C Release --output-on-failure
 
-Two kinds of check. Neither needs the game.
+On Windows `run_regression.bat` does the same with Visual Studio's compiler. Warnings are errors, at least
+as strictly as in Unreal builds (shadowed names are errors there). `-DAUTOGRIND_SANITIZE=ON` builds with
+AddressSanitizer and UndefinedBehaviorSanitizer (GCC or Clang).
+
+| Check | What it covers |
+| --- | --- |
+| `regression` | One scene per fix: long-edge obstruction splitting, simplification, stairs, rail pairing across posts and brackets, closed curves and rail seams, slat gaps, chamfers, buried and walled edges, seams between blocks, faceted hoops and handrails, progress and cancel. Each fails when its fix is undone. Ends with `AUTOGRIND_CORE_PASS`. |
+| `benchmark` | 40 skatepark scenes built from boxes, tubes and extrusions, each with the lines it should have: modular pieces, rails, coping, pipes, convexity (domes, mounds, rounded blocks, kickers), stairs, curbs, walls and messy geometry. `-turn` also runs every scene turned and moved off the origin (200 runs). Lines are scored for coverage, pieces, kind, review status, false positives and forbidden places. `-v` prints every miss; a name part runs only matching scenes. |
+| `drawing` | The Draw mode's engine: picking by ray, snapping to sharp edges, paths along edges across modular pieces (and none across a real gap), whole edge runs, closed runs and the polyline helpers. |
+| `stress` | A 480,000-triangle ledge, 200 modular pieces and a huge floor under 100 crates, against a time limit (seconds, default 60). |
+
+Built with `-DAUTOGRIND_LEGACY` against an older detector's source, `benchmark` scores it the same way,
+counting every line as kept; that is how the 0.11 figures in the release notes were measured.
+
+### The editor module without the engine
+
+    cmake -S AutoGrind/Tests -B build -DAUTOGRIND_EDITOR_CHECK=ON -DCMAKE_CXX_COMPILER=clang++
+
+compiles and links every editor source file against `EditorCheck/`, small stand-ins for the parts of the
+engine API the module uses, with warnings as errors. It catches typos, wrong types, delegates bound to
+methods of the wrong signature, format strings that do not match their arguments and missing definitions.
+It needs GCC or Clang. Passing it does not prove the module builds against the engine; the in-engine
+checks below do.
+
+The `Tests` workflow in `.github/workflows` runs all of the above on Windows and Linux for every push.
 
 ## Scorer: the detector against retail maps
 
-`../Source/AutoGrind/Private/Core` is engine-free, so `build/harness.exe` compiles the same detector the
-plugin runs and scores it against each retail map's hand-placed GrindActors in seconds.
+`harness` runs the same detector over a whole exported map and scores it against the map's hand-placed
+GrindActors.
 
     ./run_outdoor.sh                 # builds the harness, scores OutdoorSkatepark's skate meshes
     ./run_map.sh TheBigHall          # scores a whole map (every mesh but scenery)
     PLOTS=build/plots ./run_outdoor.sh   # also draws a top-down plot per mesh
 
-Results on 2026-09-25, default settings, no per-map tuning:
+The last published results are from 0.9.0 (2026-09-25, default settings, no per-map tuning) and have not
+been remeasured since:
 
 | Map | Recall | Retail GrindType matched |
 | --- | --- | --- |
@@ -37,42 +56,61 @@ Results on 2026-09-25, default settings, no per-map tuning:
 
 Precision is a lower bound: designers did not line every edge that grinds. On OutdoorSkatepark the
 unmatched lines are real lips they skipped (deck backs, box ends, a coping-less quarter pipe).
-The three type differences are thin tops retail calls stone (a free-standing pipe, a 12 cm beam).
 
-`build/<map>.found.json.rejected.json` lists every edge turned down and why; `tools/why.py` shows
-the lines and rejections near a point, `tools/probe.py` the triangles.
+`build/<map>.found.json.rejected.json` lists every edge turned down and why; `tools/why.py` shows the lines
+and rejections near a point, `tools/probe.py` the triangles.
 
 ### Regenerating the data
 
-The `.agt` geometry and `.truth.json` lines come from your own USD + JSON export of the game's maps.
-They are derived from the game's assets, so they are not included in this repository. `tools/geometry.py` needs Pixar's `usd-core` (`pip install --target <dir> usd-core`,
-then `PYTHONPATH=<dir>`), and the export's `park-raises.usda` has NaN UVs that USD refuses: copy
-the `.usda` files with `NaN` replaced by `0` and read the copy. USD is right-handed, so the script
-mirrors Y (verified: the straight rail and the T-box edge land exactly on their GrindActors).
+The `.agt` geometry and `.truth.json` lines come from your own USD + JSON export of the game's maps. They
+are derived from the game's assets, so they are not included in this repository. `tools/geometry.py` needs
+Pixar's `usd-core` (`pip install --target <dir> usd-core`, then `PYTHONPATH=<dir>`), and the export's
+`park-raises.usda` has NaN UVs that USD refuses: copy the `.usda` files with `NaN` replaced by `0` and read
+the copy. USD is right-handed, so the script mirrors Y (verified: the straight rail and the T-box edge land
+exactly on their GrindActors).
 
     python tools/truth.py <Map>.json data/<Map>.truth.json
     python tools/geometry.py <clean copy>/<Map>.usda data/<Map>.agt flip
 
-Git Bash rewrites arguments that start with `/` into Windows paths, so name parts passed to the
-harness never start with a slash.
+Git Bash rewrites arguments that start with `/` into Windows paths, so name parts passed to the harness
+never start with a slash.
 
 ## In-engine checks
 
     powershell -File run_unreal.ps1
 
-Builds the editor (close it first) and runs `AutoGrindTestCommandlet`: UE mesh winding on the
-engine cube, a ledge box and a mirrored, turned copy giving exactly their four top edges, a thin
-cylinder giving one rail line on its crest, and the viewport preview drawing and clearing only its
-own lines. Generate then places a GrindActor per line and each is checked against the hand-placed
-ones (GrindType, edited spline on the line, one Movable query-only grind mesh per segment, and a
-grind-channel trace answering at every segment). In an editor world, generating again replaces
-only its own actors, and undo steps back through Generate and Remove. Passes with
-`AUTOGRIND_TEST_PASS` in `build/unreal-test.log`.
+Run from `<Project>/Plugins/AutoGrind/Tests` with the editor closed. Builds the editor and runs
+`AutoGrindTestCommandlet`:
 
-`-run=AutoGrindInspect -map=/Game/...` dumps every GrindActor in a map, for comparing generated ones
-with hand-placed ones.
+- UE mesh winding on the engine cube;
+- a ledge box and a mirrored, turned copy giving exactly their four top edges as stone;
+- a thin cylinder giving one rail line on its crest;
+- two cube modules end to end giving one line along both, naming both as sources;
+- a cube bent along a spline mesh scanned as it is bent;
+- the viewport preview drawing, redrawing and clearing only its own lines;
+- Generate placing a GrindActor per line made like the hand-placed ones (GrindType, edited spline on the
+  line, one Movable query-only grind mesh per segment, a grind-channel trace answering at every segment);
+- in an editor world: invalid lines, deleted sources and incompatible classes failing without changing
+  earlier output, generating again replacing only its own actors, undo and redo through Generate and
+  Remove, and a line drawn by hand surviving Generate and Remove Scanned Lines.
 
-Headless traps: commandlets start without the editor's undo buffer (`GEditor->Trans` is null; the
-test makes one with `CreateTrans`), and only non-game worlds record destroyed actors for undo
-(`UWorld::DestroyActor` calls `Modify` only there). A headless editor world never builds its
-collision tree, so the trace checks run in a game world.
+Passes with `AUTOGRIND_TEST_PASS` in `build/unreal-test.log`.
+
+`-run=AutoGrindInspect -map=/Game/...` dumps every GrindActor in a map, for comparing generated ones with
+hand-placed ones.
+
+Headless traps: commandlets start without the editor's undo buffer (`GEditor->Trans` is null; the test makes
+one with `CreateTrans`), and only non-game worlds record destroyed actors for undo (`UWorld::DestroyActor`
+calls `Modify` only there). A headless editor world never builds its collision tree, so the trace checks run
+in a game world.
+
+## Releasing
+
+1. The `Tests` workflow is green.
+2. In a Rollout Inline mod project with the plugin in `Plugins/AutoGrind`: `run_unreal.ps1` passes.
+3. In the editor, on a real map: scan selected actors and the whole level, review and generate, draw a few
+   lines (snapped, followed round a curve, Ctrl+Click, closed), undo and redo each, and remove them.
+4. Package the mod and ride a ledge, a rail, coping, a joined modular line and a drawn line in the game.
+5. Set `VersionName` in `AutoGrind.uplugin`, add the release notes, and build the zip with
+   `powershell -ExecutionPolicy Bypass -File scripts/package.ps1` (add `-StrictIncludes` once to check every
+   file includes what it uses). Attach the zip to a GitHub release.

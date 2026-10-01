@@ -1,0 +1,53 @@
+# Builds the engine-free detector and runs its checks on Windows and Linux, and compile-checks the editor
+# module against stand-in engine headers. The in-engine checks (AutoGrind/Tests/run_unreal.ps1) need an
+# Unreal install and are run by hand before a release.
+name: Tests
+
+on:
+  push:
+    paths:
+      - 'AutoGrind/Source/**'
+      - 'AutoGrind/Tests/**'
+      - '.github/workflows/tests.yml'
+  pull_request:
+    paths:
+      - 'AutoGrind/Source/**'
+      - 'AutoGrind/Tests/**'
+      - '.github/workflows/tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detector:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows, MSVC, C++20
+            os: windows-latest
+            options: -DCMAKE_CXX_STANDARD=20
+          - name: Linux, GCC, C++17
+            os: ubuntu-latest
+            options: -DCMAKE_CXX_COMPILER=g++ -DCMAKE_CXX_STANDARD=17
+          - name: Linux, Clang, C++20, editor check
+            os: ubuntu-latest
+            options: -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_STANDARD=20 -DAUTOGRIND_EDITOR_CHECK=ON
+          - name: Linux, GCC, sanitizers
+            os: ubuntu-latest
+            options: -DCMAKE_CXX_COMPILER=g++ -DCMAKE_CXX_STANDARD=20 -DAUTOGRIND_SANITIZE=ON
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S AutoGrind/Tests -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.options }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

@@ -42,6 +42,43 @@ foreach(Program regression benchmark drawing stress harness)
 	target_compile_options(${Program} PRIVATE ${AUTOGRIND_WARNINGS})
 endforeach()
 
+# A compile and link check of the editor module against EditorCheck/, small stand-ins for the parts of the
+# engine API it uses. It catches typos, wrong types, mismatched delegates and format strings, and missing
+# definitions without Unreal; it does not prove the module builds against the engine (run_unreal.ps1 does).
+option(AUTOGRIND_EDITOR_CHECK "Compile and link the editor module against stand-in engine headers (GCC or Clang)" OFF)
+if(AUTOGRIND_EDITOR_CHECK)
+	if(MSVC)
+		message(FATAL_ERROR "AUTOGRIND_EDITOR_CHECK needs GCC or Clang")
+	endif()
+	set(EDITOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Source/AutoGrind/Private")
+	set(FORWARD_DIR "${CMAKE_CURRENT_BINARY_DIR}/editor_check_include")
+	file(GLOB EDITOR_SOURCES CONFIGURE_DEPENDS "${EDITOR_DIR}/*.cpp")
+	file(GLOB EDITOR_FILES CONFIGURE_DEPENDS "${EDITOR_DIR}/*.cpp" "${EDITOR_DIR}/*.h")
+	# Every engine header the module includes forwards to the stand-ins; generated headers are empty.
+	foreach(File ${EDITOR_FILES})
+		file(STRINGS "${File}" Includes REGEX "^#include \"[^\"]+\"")
+		foreach(Line ${Includes})
+			string(REGEX REPLACE "^#include \"([^\"]+)\".*" "\\1" Header "${Line}")
+			if(EXISTS "${EDITOR_DIR}/${Header}")
+				continue()
+			endif()
+			if(Header MATCHES "\\.generated\\.h$")
+				file(WRITE "${FORWARD_DIR}/${Header}" "")
+			else()
+				file(WRITE "${FORWARD_DIR}/${Header}" "#pragma once\n#include \"UEStubAll.h\"\n")
+			endif()
+		endforeach()
+	endforeach()
+	add_executable(editor_check ${EDITOR_SOURCES} EditorCheck/Definitions.cpp)
+	target_include_directories(editor_check PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/EditorCheck" "${FORWARD_DIR}" "${EDITOR_DIR}")
+	target_link_libraries(editor_check PRIVATE autogrind_core)
+	set_target_properties(editor_check PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+	# Unreal builds treat shadowed names as errors. Two Draw mode overrides are deliberately not marked
+	# override: they are declared differently across engine versions.
+	target_compile_options(editor_check PRIVATE -Wall -Wextra -Wshadow -Werror -Wno-unused-parameter -Wno-missing-field-initializers
+		$<$<CXX_COMPILER_ID:Clang>:-Wno-inconsistent-missing-override>)
+endif()
+
 enable_testing()
 add_test(NAME regression COMMAND regression)
 add_test(NAME drawing COMMAND drawing)
@@ -49,3 +86,6 @@ add_test(NAME drawing COMMAND drawing)
 add_test(NAME benchmark COMMAND benchmark -turn)
 # Generous time limit: shared CI machines are slow.
 add_test(NAME stress COMMAND stress 60)
+if(AUTOGRIND_EDITOR_CHECK)
+	add_test(NAME editor_check COMMAND editor_check)
+endif()
