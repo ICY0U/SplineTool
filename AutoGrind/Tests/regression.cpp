@@ -1,6 +1,7 @@
 #include "../Source/AutoGrind/Private/Core/AutoGrindCore.h"
 #include <cmath>
 #include <iostream>
+#include <string>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -175,5 +176,74 @@ int main() {
     Lines = ScanIn({Handrail}, {}, Defaults);
     Require(Lines.size() == 1 && Lines[0].Kind == LineKind::Rail, "a sloped handrail must be one rail");
     Require(std::abs(Lines[0].Length - 300) < 5, "the handrail's rail must run its whole length");
-    std::cout << "PASS sloped handrail of long facets\nAUTOGRIND_CORE_PASS\n";
+    std::cout << "PASS sloped handrail of long facets\n";
+
+    // 1.0: modular pieces, classification, filtering and the scan options.
+    auto Module = [](double X0, double X1) { Mesh M; M.Name = "module"; Box(M, X0, 0, 0, X1, 60, 50); return M; };
+    Lines = ScanIn({Module(0, 150), Module(150, 300)}, {}, Defaults);
+    Require(Lines.size() == 4, "two touching modules give four lines");
+    int Joined = 0;
+    for (const auto& L : Lines) Joined += L.MeshIndices.size() == 2 && std::abs(L.Length - 300) < 0.5 && (L.LineNotes & Notes::Joined);
+    Require(Joined == 2, "the long sides of touching modules are one line each, across both meshes");
+    Settings Apart = Defaults; Apart.bJoinAcrossMeshes = false;
+    Require(ScanIn({Module(0, 150), Module(150, 300)}, {}, Apart).size() == 6, "with joining off each module keeps its own lines");
+    std::cout << "PASS lines joined across meshes, and not when turned off\n";
+
+    Mesh Pad; Pad.Name = "pad"; Box(Pad, 0, 0, 0, 300, 120, 18);
+    Lines = ScanIn({Pad}, {}, Defaults);
+    Require(Lines.size() == 4, "a low pad's edges are listed");
+    for (const auto& L : Lines) Require(!L.bSuggested && (L.LineNotes & Notes::LowLedge) && L.Confidence < Defaults.KeepConfidence, "a low ledge is listed for review, not kept");
+    Settings KeepLow = Defaults; KeepLow.LowLedges = LowLedgeMode::Keep;
+    for (const auto& L : ScanIn({Pad}, {}, KeepLow)) Require(L.bSuggested, "Low Ledges Keep keeps them");
+    Settings NoLow = Defaults; NoLow.LowLedges = LowLedgeMode::Off;
+    Require(ScanIn({Pad}, {}, NoLow).empty(), "Low Ledges Off leaves them out");
+    std::cout << "PASS low ledges: suggested, kept or off\n";
+
+    Mesh Tall; Tall.Name = "tall"; Box(Tall, 0, 0, 0, 300, 100, 600);
+    Settings Capped = Defaults; Capped.MaxDrop = 400;
+    Rejected.clear();
+    Require(ScanIn({Tall}, {}, Capped, &Rejected).empty(), "edges falling more than Max Drop are left out");
+    bool bTooHigh = false;
+    for (const auto& R : Rejected) bTooHigh |= R.Reason == Reject::TooHigh;
+    Require(bTooHigh, "they are reported as too high");
+    for (const auto& L : ScanIn({Tall}, {}, Defaults)) Require(L.LineNotes & Notes::HighDrop, "without a cap a 6 m fall is flagged as high");
+    std::cout << "PASS Max Drop and High Drop\n";
+
+    Mesh Flipped; Flipped.Name = "flipped"; Box(Flipped, 0, 0, 0, 300, 100, 45);
+    for (size_t I = 0; I + 2 < Flipped.Indices.size(); I += 3) {
+        const Vec3 &P0 = Flipped.Vertices[Flipped.Indices[I]], &P1 = Flipped.Vertices[Flipped.Indices[I + 1]], &P2 = Flipped.Vertices[Flipped.Indices[I + 2]];
+        if ((P1.X - P0.X) * (P2.Y - P0.Y) - (P1.Y - P0.Y) * (P2.X - P0.X) > 0 && P0.Z > 44) { std::swap(Flipped.Indices[I + 1], Flipped.Indices[I + 2]); break; }
+    }
+    Require(ScanIn({Flipped}, {}, Defaults).size() == 4, "a top triangle wound the wrong way is turned round");
+    Settings Raw = Defaults; Raw.bRepairWinding = false;
+    Require(ScanIn({Flipped}, {}, Raw).size() < 4, "without repair the flipped triangle breaks the top");
+    std::cout << "PASS winding repair\n";
+
+    Mesh Wall14; Wall14.Name = "wall"; Box(Wall14, 0, -7, 0, 300, 7, 100);
+    Lines = ScanIn({Wall14}, {}, Defaults);
+    Require(Lines.size() == 1 && Lines[0].Kind == LineKind::Stone && Lines[0].Shape == LineShape::Crest && Lines[0].Thickness > Defaults.RailMaxThickness, "a narrow wall is one stone line on its crest");
+    Settings AllRails = Defaults; AllRails.RailMaxThickness = 0;
+    Lines = ScanIn({Wall14}, {}, AllRails);
+    Require(Lines.size() == 1 && Lines[0].Kind == LineKind::Rail, "with Rail Max Thickness 0 every narrow top is a rail");
+    std::cout << "PASS narrow walls are stone, thin bars rail\n";
+
+    // Progress and cancelling.
+    {
+        std::vector<Mesh> Many;
+        for (int K = 0; K < 10; ++K) { Mesh M; M.Name = "crate"; Box(M, K * 400.0, 0, 0, K * 400.0 + 120, 80, 60); Many.push_back(M); }
+        std::vector<Mesh> Context = Many; Context.push_back(::Ground());
+        const TriangleField Field(Context);
+        ScanOptions Options;
+        size_t Calls = 0;
+        bool bCancelled = false;
+        Options.bCancelled = &bCancelled;
+        Options.Progress = [&](size_t Done, size_t Total) { Require(Total == 10 && Done == Calls, "progress counts meshes in order"); ++Calls; return Done < 4; };
+        Lines = FindGrindLines(Many, [&](const Vec3& From, double Max) { return Field.Below(From, Max); }, [&](const Vec3& From, const Vec3& To) { return Field.FirstHit(From, To); }, Defaults, Options);
+        Require(bCancelled && Calls == 5 && Lines.size() == 16, "cancelling after four meshes keeps their lines and stops");
+    }
+    std::cout << "PASS progress and cancel\n";
+
+    for (int R = 0; R < int(Reject::Count); ++R) Require(std::string(Describe(Reject(R))).size() > 5 && std::string(SettingFor(Reject(R))).size() > 2, "every reason has a description and a setting");
+    for (uint32_t N = 0; N < Notes::Count; ++N) Require(std::string(DescribeNote(1u << N)).size() > 3, "every note has a description");
+    std::cout << "PASS reasons and notes are described\nAUTOGRIND_CORE_PASS\n";
 }

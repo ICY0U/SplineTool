@@ -6,4 +6,4 @@ if not exist "%VCVARS%" set VCVARS=C:\Program Files (x86)\Microsoft Visual Studi
 call "%VCVARS%" >nul || exit /b 1
 cd /d "%~dp0"
 if not exist build mkdir build
-cl /nologo /D_CRT_SECURE_NO_WARNINGS /std:c++17 /O2 /W4 /WX /EHsc /Fobuild\ /Febuild\harness.exe harness.cpp ..\Source\AutoGrind\Private\Core\AutoGrindCore.cpp
+cl /nologo /D_CRT_SECURE_NO_WARNINGS /std:c++17 /O2 /W4 /WX /EHsc /Fobuild\ /Febuild\harness.exe harness.cpp ..\Source\AutoGrind\Private\Core\*.cpp

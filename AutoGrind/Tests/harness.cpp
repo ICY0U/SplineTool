@@ -36,14 +36,14 @@ static bool ReadAgt(const char* Path, std::vector<Mesh>& Out)
 		File.read(M.Name.data(), NameBytes);
 		File.read(reinterpret_cast<char*>(&VertexCount), 4);
 		std::vector<float> Raw(size_t(VertexCount) * 3);
-		File.read(reinterpret_cast<char*>(Raw.data()), Raw.size() * 4);
+		File.read(reinterpret_cast<char*>(Raw.data()), std::streamsize(Raw.size() * 4));
 		for (uint32_t V = 0; V < VertexCount; ++V)
 		{
 			M.Vertices.push_back({Raw[V * 3], Raw[V * 3 + 1], Raw[V * 3 + 2]});
 		}
 		File.read(reinterpret_cast<char*>(&TriangleCount), 4);
 		M.Indices.resize(size_t(TriangleCount) * 3);
-		File.read(reinterpret_cast<char*>(M.Indices.data()), M.Indices.size() * 4);
+		File.read(reinterpret_cast<char*>(M.Indices.data()), std::streamsize(M.Indices.size() * 4));
 		if (!File)
 		{
 			return false;
@@ -123,8 +123,11 @@ int main(int ArgCount, char** Args)
 	for (size_t I = 0; I < Lines.size(); ++I)
 	{
 		const Line& L = Lines[I];
-		std::fprintf(Out, " {\"mesh\": \"%s\", \"kind\": \"%s\", \"closed\": %s, \"length\": %.1f, \"drop\": %.1f, \"width\": %.1f, \"points\": [",
-			Scan[L.MeshIndex].Name.c_str(), L.Kind == LineKind::Rail ? "rail" : "stone", L.bClosed ? "true" : "false", L.Length, L.Drop, L.TopWidth);
+		const char* Shape = L.Shape == LineShape::Crest ? "crest" : L.Shape == LineShape::Ridge ? "ridge" : "lip";
+		std::fprintf(Out, " {\"mesh\": \"%s\", \"meshes\": %zu, \"kind\": \"%s\", \"shape\": \"%s\", \"closed\": %s, \"suggested\": %s, \"confidence\": %.2f, \"notes\": %u, "
+			"\"length\": %.1f, \"drop\": %.1f, \"width\": %.1f, \"thickness\": %.1f, \"edge_angle\": %.1f, \"points\": [",
+			Scan[L.MeshIndex].Name.c_str(), L.MeshIndices.size(), L.Kind == LineKind::Rail ? "rail" : "stone", Shape, L.bClosed ? "true" : "false", L.bSuggested ? "true" : "false",
+			L.Confidence, L.LineNotes, L.Length, L.Drop, L.TopWidth, L.Thickness, L.EdgeAngle);
 		for (size_t P = 0; P < L.Points.size(); ++P)
 		{
 			std::fprintf(Out, "%s[%.2f, %.2f, %.2f]", P ? ", " : "", L.Points[P].X, L.Points[P].Y, L.Points[P].Z);
@@ -145,7 +148,7 @@ int main(int ArgCount, char** Args)
 	{
 		const Rejection& R = Rejected[I];
 		std::fprintf(Misses, " {\"mesh\": \"%s\", \"reason\": \"%s\", \"drop\": %.1f, \"a\": [%.2f, %.2f, %.2f], \"b\": [%.2f, %.2f, %.2f]}%s\n",
-			Scan[R.MeshIndex].Name.c_str(), R.Reason, R.Drop < -1e9 ? -1e9 : R.Drop, R.A.X, R.A.Y, R.A.Z, R.B.X, R.B.Y, R.B.Z, I + 1 < Rejected.size() ? "," : "");
+			Scan[R.MeshIndex].Name.c_str(), Describe(R.Reason), R.Drop < -1e9 ? -1e9 : R.Drop, R.A.X, R.A.Y, R.A.Z, R.B.X, R.B.Y, R.B.Z, I + 1 < Rejected.size() ? "," : "");
 	}
 	std::fprintf(Misses, "]\n");
 	std::fclose(Misses);

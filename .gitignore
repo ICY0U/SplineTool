@@ -1,0 +1,17 @@
+# Unreal build output: binaries are built per engine version and attached to releases, not committed.
+AutoGrind/Binaries/
+AutoGrind/Intermediate/
+AutoGrind/Saved/
+*.pdb
+*.sln
+.vs/
+.vscode/
+.idea/
+
+# Test builds and the retail-map data, which is derived from the game's assets.
+AutoGrind/Tests/build/
+AutoGrind/Tests/data/
+build/
+out/
+*.agt
+__pycache__/

@@ -351,7 +351,7 @@ namespace AutoGrind
 		Result.Lines.Sort([](const FAutoGrindLine& L, const FAutoGrindLine& R) { return L.Length > R.Length; });
 		for (const AutoGrindCore::Rejection& Rejected : Rejections)
 		{
-			Result.NearMisses.Add({FromCore(Rejected.A), FromCore(Rejected.B), UTF8_TO_TCHAR(Rejected.Reason)});
+			Result.NearMisses.Add({FromCore(Rejected.A), FromCore(Rejected.B), UTF8_TO_TCHAR(AutoGrindCore::Describe(Rejected.Reason))});
 		}
 		Result.Seconds = FPlatformTime::Seconds() - Started;
 		return Result;
