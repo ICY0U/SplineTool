@@ -230,6 +230,16 @@ namespace AutoGrindCore
 		}
 	}
 
+	std::pair<Vec3, Vec3> EdgeGraph::EdgeEnds(int64_t Index) const
+	{
+		if (Index < 0 || size_t(Index) >= Edges.size())
+		{
+			return {};
+		}
+		const Edge& Found = Edges[size_t(Index)];
+		return {Points[Found.A], Points[Found.B]};
+	}
+
 	std::optional<EdgeGraph::Snap> EdgeGraph::Nearest(const Vec3& Point, double Radius) const
 	{
 		std::optional<Snap> Best;

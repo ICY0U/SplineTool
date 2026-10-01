@@ -3,6 +3,7 @@
 #include "AutoGrindGenerate.h"
 #include "AutoGrindPreview.h"
 #include "AutoGrindScan.h"
+#include "AutoGrindSettings.h"
 #include "Components/LineBatchComponent.h"
 #include "Components/SplineComponent.h"
 #include "Components/SplineMeshComponent.h"
@@ -34,12 +35,22 @@ namespace AutoGrindTest
 		TArray<const FAutoGrindLine*> Out;
 		for (const FAutoGrindLine& Line : Result.Lines)
 		{
-			if (Line.Source.Get() == Actor)
+			if (Line.MainSource() == Actor)
 			{
 				Out.Add(&Line);
 			}
 		}
 		return Out;
+	}
+
+	FAutoGrindScanResult ScanActors(UWorld& World, const TArray<AActor*>& Actors)
+	{
+		FAutoGrindScanRequest Request;
+		Request.Actors = Actors;
+		Request.Core = AutoGrindCore::Settings();
+		Request.bCollectNearMisses = true;
+		Request.bShowProgress = false;
+		return AutoGrind::Scan(World, Request);
 	}
 }
 
@@ -81,6 +92,21 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 	AActor* Box = AutoGrindTest::SpawnMesh(*World, Cube, FTransform(FRotator::ZeroRotator, FVector(0, 0, 22.5), FVector(3, 1.2, 0.45)), TEXT("Box"));
 	AActor* Mirrored = AutoGrindTest::SpawnMesh(*World, Cube, FTransform(FRotator(0, 30, 0), FVector(0, 600, 22.5), FVector(-3, 1.2, 0.45)), TEXT("Mirrored"));
 	AActor* Rail = AutoGrindTest::SpawnMesh(*World, Cylinder, FTransform(FRotator(0, 0, 90), FVector(0, -600, 100), FVector(0.1, 0.1, 4)), TEXT("Rail"));
+	// Two 1.5 m ledge modules end to end, as modular pieces are placed: their long sides are one line each.
+	AActor* ModuleA = AutoGrindTest::SpawnMesh(*World, Cube, FTransform(FRotator::ZeroRotator, FVector(-75, 1200, 25), FVector(1.5, 0.6, 0.5)), TEXT("ModuleA"));
+	AActor* ModuleB = AutoGrindTest::SpawnMesh(*World, Cube, FTransform(FRotator::ZeroRotator, FVector(75, 1200, 25), FVector(1.5, 0.6, 0.5)), TEXT("ModuleB"));
+	// The cube bent along a straight 3 m spline: a 3 m x 1 m x 1 m ledge.
+	AActor* Bent = World->SpawnActor<AActor>();
+	{
+		USplineMeshComponent* SplineMesh = NewObject<USplineMeshComponent>(Bent, TEXT("BentLedge"));
+		SplineMesh->SetStaticMesh(Cube);
+		SplineMesh->SetCollisionProfileName(TEXT("BlockAll"));
+		SplineMesh->SetForwardAxis(ESplineMeshAxis::X, false);
+		SplineMesh->SetStartAndEnd(FVector::ZeroVector, FVector(300, 0, 0), FVector(300, 0, 0), FVector(300, 0, 0), true);
+		Bent->SetRootComponent(SplineMesh);
+		SplineMesh->RegisterComponent();
+		Bent->SetActorLocation(FVector(-150, 1800, 50));
+	}
 	World->UpdateWorldComponents(true, false);
 	// Chaos adds new bodies to its query structure when the world ticks; the editor world ticks on its own.
 	World->InitializeActorsForPlay(FURL());
@@ -91,7 +117,7 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 	checkf(World->LineTraceSingleByChannel(FloorHit, FVector(1000, 1000, 500), FVector(1000, 1000, -500), ECC_Visibility, FCollisionQueryParams(NAME_None, true)) && FMath::IsNearlyEqual(FloorHit.ImpactPoint.Z, 0.0, 0.5),
 		TEXT("The test floor has no collision, so no drop can be measured"));
 
-	const FAutoGrindScanResult Result = AutoGrind::Scan(*World, {Box, Mirrored, Rail}, AutoGrindCore::Settings(), true);
+	const FAutoGrindScanResult Result = AutoGrindTest::ScanActors(*World, {Box, Mirrored, Rail});
 	for (const FAutoGrindLine& Line : Result.Lines)
 	{
 		UE_LOG(LogAutoGrindTest, Display, TEXT("line on %s: %s, %d points, length %.1f, drop %.1f, from %s to %s"), *Line.SourceLabel, Line.bRail ? TEXT("rail") : TEXT("stone"),
@@ -111,7 +137,7 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 			{
 				if (Around.IsInside(Miss.A) && FMath::IsNearlyEqual(Miss.A.Z, 45.0, 1.0))
 				{
-					UE_LOG(LogAutoGrindTest, Display, TEXT("near miss on %s: %s, from %s to %s"), *Each->GetName(), *Miss.Reason, *Miss.A.ToString(), *Miss.B.ToString());
+					UE_LOG(LogAutoGrindTest, Display, TEXT("near miss on %s: %s, from %s to %s"), *Each->GetName(), *Miss.Text, *Miss.A.ToString(), *Miss.B.ToString());
 				}
 			}
 		}
@@ -146,6 +172,37 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 	}
 	UE_LOG(LogAutoGrindTest, Display, TEXT("RAIL_PASS: the rail gives one rail line on its crest"));
 
+	// Modular pieces: one line along both modules' long sides, naming both as its sources.
+	{
+		const FAutoGrindScanResult Modular = AutoGrindTest::ScanActors(*World, {ModuleA, ModuleB});
+		int32 Joined = 0;
+		for (const FAutoGrindLine& Line : Modular.Lines)
+		{
+			UE_LOG(LogAutoGrindTest, Display, TEXT("modular line: %s, %.1f long, %d source(s)"), Line.bRail ? TEXT("rail") : TEXT("stone"), Line.Length, Line.Sources.Num());
+			Joined += FMath::IsNearlyEqual(Line.Length, 300.0, 1.0) && Line.Sources.Num() == 2 && Line.Sources.Contains(ModuleA) && Line.Sources.Contains(ModuleB) ? 1 : 0;
+		}
+		checkf(Modular.Lines.Num() == 4 && Joined == 2, TEXT("Two touching modules gave %d lines, %d joined across both; expected 4 and 2"), Modular.Lines.Num(), Joined);
+	}
+	UE_LOG(LogAutoGrindTest, Display, TEXT("MODULAR_PASS: modules placed end to end give one line along both"));
+
+	// A spline mesh is scanned as it is bent, not as its straight mesh.
+	{
+		const FAutoGrindScanResult Spline = AutoGrindTest::ScanActors(*World, {Bent});
+		TArray<double> Lengths;
+		for (const FAutoGrindLine& Line : Spline.Lines)
+		{
+			UE_LOG(LogAutoGrindTest, Display, TEXT("spline-mesh line: %.1f long from %s to %s"), Line.Length, *Line.Points[0].ToString(), *Line.Points.Last().ToString());
+			for (const FVector& Point : Line.Points)
+			{
+				checkf(FMath::IsNearlyEqual(Point.Z, 100.0, 0.5), TEXT("Spline-mesh line point %s is not on the bent ledge's top"), *Point.ToString());
+			}
+			Lengths.Add(Line.Length);
+		}
+		Lengths.Sort();
+		checkf(Lengths.Num() == 4 && FMath::IsNearlyEqual(Lengths[0], 100.0, 1.0) && FMath::IsNearlyEqual(Lengths[3], 300.0, 1.0), TEXT("The bent ledge gave %d lines, expected its 4 top edges"), Lengths.Num());
+	}
+	UE_LOG(LogAutoGrindTest, Display, TEXT("SPLINE_MESH_PASS: a spline mesh is scanned as it is bent"));
+
 	// The preview: drawn into the persistent batcher and cleared again without touching other lines.
 	{
 		ULineBatchComponent* Lines = World->PersistentLineBatcher;
@@ -158,9 +215,13 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 			Shared.Add(MakeShared<FAutoGrindLine>(Line));
 			Segments += Line.Points.Num() - 1;
 		}
-		AutoGrind::DrawPreview(*World, Shared, {}, Shared[0].Get());
+		// Without the arrows a selected line gets, each line segment is one batched line.
+		AutoGrind::FPreviewStyle Style;
+		AutoGrind::DrawPreview(*World, Shared, {}, {}, Style);
 		checkf(Lines->BatchedLines.Num() == Segments + 1, TEXT("Preview drew %d lines, expected %d plus the existing one"), Lines->BatchedLines.Num() - 1, Segments);
-		AutoGrind::DrawPreview(*World, Shared, {}, nullptr);
+		AutoGrind::DrawPreview(*World, Shared, {}, {Shared[0].Get()}, Style);
+		checkf(Lines->BatchedLines.Num() >= Segments + 1, TEXT("Highlighting a line lost preview lines: %d"), Lines->BatchedLines.Num());
+		AutoGrind::DrawPreview(*World, Shared, {}, {}, Style);
 		checkf(Lines->BatchedLines.Num() == Segments + 1, TEXT("Redrawing the preview did not replace it: %d lines"), Lines->BatchedLines.Num());
 		AutoGrind::ClearPreview(*World);
 		checkf(Lines->BatchedLines.Num() == 1 && Lines->BatchedPoints.Num() == 0, TEXT("Clearing left %d lines and %d points; only the unrelated line should remain"), Lines->BatchedLines.Num(), Lines->BatchedPoints.Num());
@@ -194,7 +255,10 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 			return Out;
 		};
 
-		const AutoGrind::FGenerateResult First = AutoGrind::Generate(*World, All);
+		AutoGrind::FPlaceOptions Options;
+		FString OptionsError;
+		checkf(AutoGrind::MakePlaceOptions(*GetDefault<UAutoGrindSettings>(), Options, OptionsError), TEXT("%s"), *OptionsError);
+		const AutoGrind::FGenerateResult First = AutoGrind::Generate(*World, All, Options);
 		checkf(First.Error.IsEmpty() && First.Placed == All.Num() && First.Replaced == 0, TEXT("Generate placed %d of %d lines, replaced %d: %s"), First.Placed, All.Num(), First.Replaced, *First.Error);
 		World->Tick(LEVELTICK_All, 0.016f);
 		const TArray<AActor*> Placed = Generated();
@@ -210,7 +274,7 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 			const FString TypeName = Type->Enum->GetNameStringByValue(Type->GetPropertyValue_InContainer(&Actor));
 			checkf(TypeName == (Line->bRail ? TEXT("NewEnumerator0") : TEXT("NewEnumerator1")), TEXT("%s: GrindType %s for a %s"), *Actor.GetActorNameOrLabel(), *TypeName, Line->bRail ? TEXT("rail") : TEXT("stone"));
 			checkf(FMath::IsNearlyZero(Actor.GetActorRotation().Pitch) && FMath::IsNearlyZero(Actor.GetActorRotation().Roll), TEXT("%s is tilted"), *Actor.GetActorNameOrLabel());
-			checkf(Actor.GetFolderPath() == AutoGrind::GeneratedFolder && Actor.Tags.Contains(FName(TEXT("Grind"))), TEXT("%s: folder %s, tags missing"), *Actor.GetActorNameOrLabel(), *Actor.GetFolderPath().ToString());
+			checkf(Actor.GetFolderPath() == Options.Folder && Actor.Tags.Contains(FName(TEXT("Grind"))), TEXT("%s: folder %s, tags missing"), *Actor.GetActorNameOrLabel(), *Actor.GetFolderPath().ToString());
 			const USplineComponent* Spline = Actor.FindComponentByClass<USplineComponent>();
 			checkf(Spline && Spline->bSplineHasBeenEdited && Spline->GetNumberOfSplinePoints() == Line->Points.Num(), TEXT("%s: spline missing, unedited or the wrong length"), *Actor.GetActorNameOrLabel());
 			for (int32 I = 0; I < Line->Points.Num(); ++I)
@@ -264,19 +328,24 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 			}
 			return Out;
 		};
-		const AutoGrind::FGenerateResult First = AutoGrind::Generate(*EditorWorld, All);
+		AutoGrind::FPlaceOptions Options;
+		FString OptionsError;
+		checkf(AutoGrind::MakePlaceOptions(*GetDefault<UAutoGrindSettings>(), Options, OptionsError), TEXT("%s"), *OptionsError);
+		const AutoGrind::FGenerateResult First = AutoGrind::Generate(*EditorWorld, All, Options);
 		const TArray<AActor*> Placed = Generated();
 		checkf(First.Placed == All.Num() && Placed.Num() == All.Num(), TEXT("Editor-world Generate placed %d, found %d"), First.Placed, Placed.Num());
 		FAutoGrindLine Invalid = *All[0];
 		Invalid.Points[1] = Invalid.Points[0];
-		const AutoGrind::FGenerateResult Failed = AutoGrind::Generate(*EditorWorld, {&Invalid});
+		const AutoGrind::FGenerateResult Failed = AutoGrind::Generate(*EditorWorld, {&Invalid}, Options);
 		checkf(!Failed.Error.IsEmpty() && Failed.Placed == 0 && Failed.Replaced == 0 && Generated().Contains(Placed[0]) && Generated().Num() == All.Num(), TEXT("Invalid replacement changed previous output"));
 		Invalid = *All[0];
-		Invalid.Source.Reset();
-		checkf(!AutoGrind::Generate(*EditorWorld, {&Invalid}).Error.IsEmpty() && Generated().Num() == All.Num(), TEXT("Deleted source must fail without changing output"));
-		checkf(!AutoGrind::PlaceGrindActor(*EditorWorld, *AActor::StaticClass(), All[0]->Points, true), TEXT("An incompatible actor class must not count as a successful grind"));
+		Invalid.Sources.Reset();
+		checkf(!AutoGrind::Generate(*EditorWorld, {&Invalid}, Options).Error.IsEmpty() && Generated().Num() == All.Num(), TEXT("Deleted source must fail without changing output"));
+		AutoGrind::FPlaceOptions Incompatible = Options;
+		Incompatible.GrindClass = AActor::StaticClass();
+		checkf(!AutoGrind::PlaceGrindActor(*EditorWorld, Incompatible, All[0]->Points, true), TEXT("An incompatible actor class must not count as a successful grind"));
 		UE_LOG(LogAutoGrindTest, Display, TEXT("FAILURE_PRESERVATION_PASS: invalid geometry, deleted sources and incompatible actors are rejected"));
-		const AutoGrind::FGenerateResult Second = AutoGrind::Generate(*EditorWorld, All);
+		const AutoGrind::FGenerateResult Second = AutoGrind::Generate(*EditorWorld, All, Options);
 		checkf(Second.Placed == All.Num() && Second.Replaced == All.Num() && Generated().Num() == All.Num(), TEXT("Generating again left %d actors (placed %d, replaced %d)"), Generated().Num(), Second.Placed, Second.Replaced);
 		checkf(GEditor->UndoTransaction(), TEXT("Undo of the second Generate failed"));
 		const TArray<AActor*> Restored = Generated();
@@ -305,7 +374,16 @@ int32 UAutoGrindTestCommandlet::Main(const FString& Params)
 		CheckRestoredSplines();
 		checkf(GEditor->UndoTransaction() && Generated().Contains(Placed[0]), TEXT("Second undo of replacement failed"));
 		CheckRestoredSplines();
-		checkf(AutoGrind::RemoveGenerated(*EditorWorld) == All.Num() && Generated().Num() == 0, TEXT("Remove Generated left %d actors"), Generated().Num());
+		// A line drawn by hand survives a scan's Generate and Remove Scanned Lines.
+		FString DrawError;
+		AActor* Drawn = AutoGrind::PlaceDrawnLine(*EditorWorld, All[0]->Points, false, Options, DrawError);
+		checkf(Drawn && Drawn->Tags.Contains(AutoGrind::DrawnTag), TEXT("Drawing a line failed: %s"), *DrawError);
+		checkf(AutoGrind::Generate(*EditorWorld, All, Options).Error.IsEmpty() && IsValid(Drawn) && Generated().Contains(Drawn), TEXT("Generate replaced a drawn line"));
+		checkf(AutoGrind::RemoveGenerated(*EditorWorld, true, false) == All.Num() && Generated().Num() == 1 && Generated()[0] == Drawn, TEXT("Remove Scanned Lines must keep the drawn line"));
+		checkf(GEditor->UndoTransaction() && Generated().Num() == All.Num() + 1, TEXT("Undo of Remove Scanned Lines failed"));
+		checkf(GEditor->UndoTransaction() && GEditor->UndoTransaction() && Generated().Num() == All.Num(), TEXT("Undo of the drawn line failed"));
+		UE_LOG(LogAutoGrindTest, Display, TEXT("DRAWN_PASS: lines drawn by hand are kept apart from scanned ones"));
+		checkf(AutoGrind::RemoveGenerated(*EditorWorld, true, true) == All.Num() && Generated().Num() == 0, TEXT("Remove Generated left %d actors"), Generated().Num());
 		checkf(GEditor->UndoTransaction() && Generated().Num() == All.Num(), TEXT("Undo of Remove Generated left %d actors"), Generated().Num());
 		CheckRestoredSplines();
 		GEngine->DestroyWorldContext(EditorWorld);

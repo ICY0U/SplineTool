@@ -9,11 +9,10 @@ namespace AutoGrind
 	{
 		// Every preview line carries this batch, so clearing removes AutoGrind's lines and nothing else.
 		constexpr uint32 PreviewBatch = 0x41475244; // "AGRD"
+		// Arrows along a line, this far apart and this big.
+		constexpr double ArrowSpacing = 100;
+		constexpr double ArrowSize = 6;
 
-		const FLinearColor StoneColour(FColor(40, 150, 255));
-		const FLinearColor RailColour(FColor(255, 70, 60));
-		const FLinearColor UntickedColour(FColor(90, 90, 90));
-		const FLinearColor HighlightColour(FColor(255, 220, 0));
 		const FLinearColor NearMissColour(FColor(150, 150, 150));
 
 		// The persistent batcher, not the foreground one: the editor viewport flushes the foreground
@@ -24,21 +23,60 @@ namespace AutoGrind
 			return World.PersistentLineBatcher;
 		}
 
-		void DrawPolyline(ULineBatchComponent& Lines, const TArray<FVector>& Points, const FLinearColor& Colour, float Thickness)
+		void DrawArrows(ULineBatchComponent& Batch, const TArray<FVector>& Points, const FLinearColor& Colour, float Thickness)
 		{
+			double Walked = 0;
+			double Next = ArrowSpacing / 2;
 			for (int32 I = 0; I + 1 < Points.Num(); ++I)
 			{
-				Lines.DrawLine(Points[I], Points[I + 1], Colour, SDPG_Foreground, Thickness, 0, PreviewBatch);
+				const FVector Along = Points[I + 1] - Points[I];
+				const double Length = Along.Size();
+				if (Length <= KINDA_SMALL_NUMBER)
+				{
+					continue;
+				}
+				const FVector Direction = Along / Length;
+				FVector Side = FVector::CrossProduct(Direction, FVector::UpVector).GetSafeNormal();
+				if (Side.IsNearlyZero())
+				{
+					Side = FVector::RightVector;
+				}
+				while (Next <= Walked + Length)
+				{
+					const FVector Tip = Points[I] + Direction * (Next - Walked) + FVector(0, 0, 1);
+					const FVector Back = Tip - Direction * ArrowSize;
+					Batch.DrawLine(Tip, Back + Side * ArrowSize * 0.6, Colour, SDPG_Foreground, Thickness, 0, PreviewBatch);
+					Batch.DrawLine(Tip, Back - Side * ArrowSize * 0.6, Colour, SDPG_Foreground, Thickness, 0, PreviewBatch);
+					Next += ArrowSpacing;
+				}
+				Walked += Length;
 			}
-			if (Points.Num() > 0)
+		}
+
+		void DrawPolyline(ULineBatchComponent& Batch, const FAutoGrindLine& Line, const FLinearColor& Colour, float Thickness, bool bArrows)
+		{
+			for (int32 I = 0; I + 1 < Line.Points.Num(); ++I)
 			{
-				Lines.DrawPoint(Points[0], Colour, Thickness * 3, SDPG_Foreground, 0, PreviewBatch);
-				Lines.DrawPoint(Points.Last(), Colour, Thickness * 3, SDPG_Foreground, 0, PreviewBatch);
+				Batch.DrawLine(Line.Points[I], Line.Points[I + 1], Colour, SDPG_Foreground, Thickness, 0, PreviewBatch);
+			}
+			if (Line.Points.Num() > 0 && !Line.bClosed)
+			{
+				Batch.DrawPoint(Line.Points[0], Colour, Thickness * 3, SDPG_Foreground, 0, PreviewBatch);
+				Batch.DrawPoint(Line.Points.Last(), Colour, Thickness * 3, SDPG_Foreground, 0, PreviewBatch);
+			}
+			if (bArrows)
+			{
+				DrawArrows(Batch, Line.Points, Colour, FMath::Max(1.0f, Thickness * 0.6f));
 			}
 		}
 	}
 
-	void DrawPreview(const UWorld& World, const TArray<TSharedPtr<FAutoGrindLine>>& Lines, const TArray<FAutoGrindNearMiss>& NearMisses, const FAutoGrindLine* Highlighted)
+	FLinearColor RailColour() { return FLinearColor(FColor(255, 70, 60)); }
+	FLinearColor StoneColour() { return FLinearColor(FColor(40, 150, 255)); }
+	FLinearColor ReviewColour() { return FLinearColor(FColor(110, 110, 110)); }
+	FLinearColor HighlightColour() { return FLinearColor(FColor(255, 220, 0)); }
+
+	void DrawPreview(const UWorld& World, const TArray<TSharedPtr<FAutoGrindLine>>& Lines, const TArray<FAutoGrindNearMiss>& NearMisses, const TSet<const FAutoGrindLine*>& Selected, const FPreviewStyle& Style)
 	{
 		ClearPreview(World);
 		ULineBatchComponent* Target = Batcher(World);
@@ -50,16 +88,25 @@ namespace AutoGrind
 		{
 			Target->DrawLine(Miss.A, Miss.B, NearMissColour, SDPG_Foreground, 1, 0, PreviewBatch);
 		}
-		for (const TSharedPtr<FAutoGrindLine>& Line : Lines)
+		// Unticked lines first, so kept lines draw over them where they meet.
+		for (int32 Pass = 0; Pass < 2; ++Pass)
 		{
-			if (Line.Get() != Highlighted)
+			for (const TSharedPtr<FAutoGrindLine>& Line : Lines)
 			{
-				DrawPolyline(*Target, Line->Points, !Line->bKeep ? UntickedColour : Line->bRail ? RailColour : StoneColour, 3);
+				if (!Line || Selected.Contains(Line.Get()) || Line->bKeep != (Pass == 1))
+				{
+					continue;
+				}
+				const FLinearColor Colour = !Line->bKeep ? ReviewColour() : Line->bRail ? RailColour() : StoneColour();
+				DrawPolyline(*Target, *Line, Colour, Line->bKeep ? Style.Thickness : FMath::Max(1.0f, Style.Thickness * 0.6f), Style.bDirections && Line->bKeep);
 			}
 		}
-		if (Highlighted)
+		for (const TSharedPtr<FAutoGrindLine>& Line : Lines)
 		{
-			DrawPolyline(*Target, Highlighted->Points, HighlightColour, 6);
+			if (Line && Selected.Contains(Line.Get()))
+			{
+				DrawPolyline(*Target, *Line, HighlightColour(), Style.Thickness * 2, true);
+			}
 		}
 	}
 

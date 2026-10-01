@@ -307,6 +307,8 @@ namespace AutoGrindCore
 		// at each vertex and does not fork.
 		std::vector<Vec3> Chain(const Snap& At, double MaxCornerDegrees = 40) const;
 		size_t EdgeCount() const { return Edges.size(); }
+		// The two ends of a sharp edge, to show the edge a click snapped to.
+		std::pair<Vec3, Vec3> EdgeEnds(int64_t Index) const;
 
 	private:
 		struct Edge

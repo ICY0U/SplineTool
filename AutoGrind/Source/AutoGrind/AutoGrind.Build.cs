@@ -5,8 +5,8 @@ public class AutoGrind : ModuleRules
 	public AutoGrind(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-		// The detector core (Private/Core) is engine-free and keeps its helpers in an anonymous
-		// namespace; building each file on its own keeps them from meeting other files' names.
+		// The detector core (Private/Core) is engine-free and keeps its helpers in anonymous namespaces;
+		// building each file on its own keeps them from meeting other files' names.
 		bUseUnity = false;
 
 		PrivateDependencyModuleNames.AddRange(new[]
@@ -18,8 +18,10 @@ public class AutoGrind : ModuleRules
 			"Slate",
 			"SlateCore",
 			"UnrealEd",
+			"EditorFramework",
 			"ToolMenus",
 			"PropertyEditor",
+			"Projects",
 			"MeshDescription",
 			"StaticMeshDescription",
 		});
