@@ -30,9 +30,11 @@ endif()
 target_compile_options(autogrind_core PRIVATE ${AUTOGRIND_WARNINGS})
 
 if(AUTOGRIND_SANITIZE AND NOT MSVC)
-	add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+	# Undefined behaviour stops the program, so a test cannot pass over it.
+	set(AUTOGRIND_SANITIZERS -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+	add_compile_options(${AUTOGRIND_SANITIZERS})
 	add_link_options(-fsanitize=address,undefined)
-	target_compile_options(autogrind_core PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+	target_compile_options(autogrind_core PRIVATE ${AUTOGRIND_SANITIZERS})
 	target_link_options(autogrind_core PUBLIC -fsanitize=address,undefined)
 endif()
 
