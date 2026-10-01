@@ -1,0 +1,27 @@
+{
+	"FileVersion": 3,
+	"Version": 3,
+	"VersionName": "0.11.0-preview",
+	"FriendlyName": "AutoGrind",
+	"Description": "Finds grindable ledges, box edges, coping and rails on the meshes you select and places Rollout Inline GrindActors along them.",
+	"Category": "Rollout Modding",
+	"CreatedBy": "ICU",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EngineVersion": "5.4.0",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "AutoGrind",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		}
+	]
+}
